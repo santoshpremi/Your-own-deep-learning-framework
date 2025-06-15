@@ -1,5 +1,5 @@
 
-Test Results - 2025-06-11 03:51:25
+Test Results - 2025-06-14 20:44:21
 ===============================
 Tests Run: 19
 Tests Passed: 19
@@ -66,12 +66,13 @@ Test Values:
   bias: [0.5, 0.6]
   expected_output: [11.5, 17.6]
 
-tests.test_layer.test_layer.TestPooling2D.test_max_pooling_forward_backward ... PASS
+tests.test_layer.test_layer.TestPooling2D.test_max_pooling_forward_backward ... ERROR
 Test Values:
   input_shape: 4x4x2
   kernel_size: 2x2
   stride: 2x2
   expected_output: [[[6,6],[8,8]],[[14,14],[16,16]]]
+Error: (<class 'ValueError'>, ValueError('not enough values to unpack (expected 4, got 3)'), <traceback object at 0x105666d40>)
 
 tests.test_layer.test_layer.TestConv2DLayer.test_backward ... PASS
 

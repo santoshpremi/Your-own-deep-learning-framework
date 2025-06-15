@@ -19,8 +19,13 @@ class Layer:
         """Backward pass of the layer"""
         raise NotImplementedError
 
-    def calculate_delta_weights(self):
-        """Calculate weight updates for the layer"""
+    def calculate_delta_weights(self, out_tensors: list, in_tensors: list) -> None:
+        """Calculate weight updates for the layer
+        
+        Args:
+            out_tensors: List containing gradient tensor from next layer
+            in_tensors: List containing input tensor
+        """
         pass  # Default implementation does nothing
 
 class InputLayer(Layer):
@@ -28,19 +33,45 @@ class InputLayer(Layer):
         super().__init__()
         self.layer_type = "InputLayer"  # Explicitly set layer type
 
-    def forward(self, inp) -> Tensor:
-        """Transform input into a Tensor"""
+    def forward(self, in_tensors: list, out_tensors: list) -> None:
+        """
+        Forward pass for input layer
+        Args:
+            in_tensors: List containing input data (numpy array or Tensor)
+            out_tensors: List to store output tensor
+        """
+        if not in_tensors:
+            raise ValueError("Input tensor list is empty")
+            
+        # Get input data (first element in the list)
+        inp = in_tensors[0]
+        
+        # Convert to numpy array if it's a Tensor
         if isinstance(inp, Tensor):
-            return inp
-        # Convert input to Tensor if not already
-        elements = np.array(inp)
-        deltas = None
-        shape = Shape(*elements.shape) if elements.ndim > 1 else Shape(len(elements))
-        return Tensor(elements, deltas, shape)
+            elements = inp.elements
+        else:
+            elements = np.array(inp)
+        
+        # Ensure output tensor exists
+        if not out_tensors:
+            out_tensors.append(Tensor())
+            
+        # Store elements in output tensor
+        out_tensors[0].elements = elements
+        out_tensors[0].shape = Shape(*elements.shape) if elements.ndim > 1 else Shape(len(elements))
 
-    def backward(self, grad_out: Tensor) -> Tensor:
-        """No transformation needed in backward pass"""
-        return grad_out
+    def backward(self, out_tensors: list, in_tensors: list) -> None:
+        """
+        Backward pass for input layer
+        Args:
+            out_tensors: List containing gradient tensor from next layer
+            in_tensors: List to store gradient tensor for previous layer
+        """
+        if not out_tensors or not in_tensors:
+            return
+            
+        # Simply pass the gradient through
+        in_tensors[0].deltas = out_tensors[0].deltas if hasattr(out_tensors[0], 'deltas') else None
 
     def calc_delta_weights(self):
         """Input layer has no weights to update"""
@@ -91,7 +122,6 @@ class FullyConnectedLayer(Layer):
             self.weights.deltas = np.outer(in_tensors[0].elements, out_tensors[0].deltas)
         else:
             self.weights.deltas = np.dot(in_tensors[0].elements.T, out_tensors[0].deltas)
-        
         # For bias: sum over batch if 2-D else direct
         if out_tensors[0].deltas.ndim == 2:
             self.bias.deltas = np.sum(out_tensors[0].deltas, axis=0)
@@ -242,84 +272,89 @@ class Pooling2DLayer(Layer):
         """
         Forward pass for pooling layer
         Args:
-            in_tensors: List containing input tensor
+            in_tensors: List containing input tensor with shape (batch_size, channels, height, width)
             out_tensors: List containing output tensor to store results
         """
         inp = in_tensors[0]
-        in_height, in_width, channels = inp.elements.shape
+        batch_size, channels, in_height, in_width = inp.elements.shape
         out_height = (in_height - self.kernel_size.dimensions[0]) // self.stride.dimensions[0] + 1
         out_width = (in_width - self.kernel_size.dimensions[1]) // self.stride.dimensions[1] + 1
         
-        # Initialize output elements
-        output = np.zeros((out_height, out_width, channels))
+        # Initialize output elements with shape (batch_size, channels, out_height, out_width)
+        output = np.zeros((batch_size, channels, out_height, out_width))
         self.max_indices = []  # Reset indices for new forward pass
         
-        # Perform pooling
-        for h in range(out_height):
-            for w in range(out_width):
-                h_start = h * self.stride.dimensions[0]
-                h_end = h_start + self.kernel_size.dimensions[0]
-                w_start = w * self.stride.dimensions[1]
-                w_end = w_start + self.kernel_size.dimensions[1]
-                
-                # For each channel
-                for c in range(channels):
-                    patch = inp.elements[h_start:h_end, w_start:w_end, c]
-                    
-                    if self.pooling_type == PoolingType.MAX:
-                        output[h, w, c] = np.max(patch)
-                        # Find position of maximum value
-                        max_pos = np.unravel_index(np.argmax(patch), patch.shape)
-                        # Store absolute indices
-                        self.max_indices.append((h_start + max_pos[0], w_start + max_pos[1], c))
-                    else:
-                        # Average pooling
-                        output[h, w, c] = np.mean(patch)
+        # Perform pooling for each sample in the batch
+        for b in range(batch_size):
+            batch_max_indices = []
+            
+            for c in range(channels):
+                for h in range(out_height):
+                    for w in range(out_width):
+                        h_start = h * self.stride.dimensions[0]
+                        h_end = h_start + self.kernel_size.dimensions[0]
+                        w_start = w * self.stride.dimensions[1]
+                        w_end = w_start + self.kernel_size.dimensions[1]
+                        
+                        # Extract window for this channel
+                        window = inp.elements[b, c, h_start:h_end, w_start:w_end]
+                        
+                        if self.pooling_type == PoolingType.MAX:
+                            # Max pooling
+                            max_val = np.max(window)
+                            output[b, c, h, w] = max_val
+                            
+                            # Find position of max value
+                            max_pos = np.unravel_index(np.argmax(window), window.shape)
+                            batch_max_indices.append((c, h, w, h_start + max_pos[0], w_start + max_pos[1]))
+                        else:
+                            # Average pooling
+                            output[b, c, h, w] = np.mean(window)
+            
+            if self.pooling_type == PoolingType.MAX:
+                self.max_indices.append(batch_max_indices)
         
-        # Store output
+        # Store output in the output tensor
         out_tensors[0].elements = output
+        out_tensors[0].shape = Shape(*output.shape)
 
     def backward(self, out_tensors: list, in_tensors: list) -> None:
         """
         Backward pass for pooling layer
         Args:
-            out_tensors: List containing gradient tensor from next layer
-            in_tensors: List containing input tensor to store gradients
+            out_tensors: List containing gradient tensor from next layer with shape (batch_size, channels, out_h, out_w)
+            in_tensors: List containing input tensor to store gradients with shape (batch_size, channels, in_h, in_w)
         """
-        grad_out = out_tensors[0]
-        in_height, in_width, channels = in_tensors[0].elements.shape
-        
-        # Initialize input gradient
-        input_grads = np.zeros((in_height, in_width, channels))
+        if not out_tensors or not in_tensors or not out_tensors[0].deltas.any():
+            return
+            
+        out_grad = out_tensors[0].deltas  # Shape: (batch_size, channels, out_h, out_w)
+        batch_size, channels, out_h, out_w = out_grad.shape
+        in_shape = in_tensors[0].elements.shape
+        in_grad = np.zeros_like(in_tensors[0].elements)  # Shape: (batch_size, channels, in_h, in_w)
         
         if self.pooling_type == PoolingType.MAX:
-            # For max pooling, route the gradient through max locations
-            idx = 0
-            out_height, out_width = grad_out.elements.shape[:2]
-            for h in range(out_height):
-                for w in range(out_width):
-                    for c in range(channels):
-                        max_h, max_w, max_c = self.max_indices[idx]
-                        input_grads[max_h, max_w, max_c] = grad_out.deltas[h, w, c]
-                        idx += 1
+            # For max pooling, only the max index gets the gradient
+            for b in range(batch_size):  # For each sample in batch
+                for c, h, w, max_h, max_w in self.max_indices[b]:
+                    in_grad[b, c, max_h, max_w] += out_grad[b, c, h, w]
         else:
-            # For average pooling, distribute gradient evenly
-            out_height, out_width = grad_out.elements.shape[:2]
+            # For average pooling, distribute gradient equally
             pool_size = self.kernel_size.dimensions[0] * self.kernel_size.dimensions[1]
             
-            for h in range(out_height):
-                for w in range(out_width):
-                    h_start = h * self.stride.dimensions[0]
-                    h_end = h_start + self.kernel_size.dimensions[0]
-                    w_start = w * self.stride.dimensions[1]
-                    w_end = w_start + self.kernel_size.dimensions[1]
-                    
-                    for c in range(channels):
-                        grad = grad_out.deltas[h, w, c] / pool_size
-                        input_grads[h_start:h_end, w_start:w_end, c] += grad
+            for b in range(batch_size):
+                for c in range(channels):
+                    for h in range(out_h):
+                        for w in range(out_w):
+                            h_start = h * self.stride.dimensions[0]
+                            h_end = h_start + self.kernel_size.dimensions[0]
+                            w_start = w * self.stride.dimensions[1]
+                            w_end = w_start + self.kernel_size.dimensions[1]
+                            
+                            grad = out_grad[b, c, h, w] / pool_size
+                            in_grad[b, c, h_start:h_end, w_start:w_end] += grad
         
-        # Store gradients
-        in_tensors[0].deltas = input_grads
+        in_tensors[0].deltas = in_grad
 
     def calc_delta_weights(self):
         """
