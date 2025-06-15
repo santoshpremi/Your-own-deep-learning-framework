@@ -1,6 +1,6 @@
-# Exercise 1: Regular Neural Network (Multi-Layer Perceptron)
+#  Regular Neural Network (Multi-Layer Perceptron)
 
-- **Last Commit**: `final complete optimized ex-01`
+- **Last Commit**: `AI is stupid`
 
 ## Requirements
 
@@ -111,9 +111,9 @@ Training progress is saved in `mnist_results/`:
 
 
 
-# Exercise 2: Convolutional Neural Network (CNN)
+# Adding: Convolutional Neural Network (CNN)
 
-- **Last Commit**: `final complete optimized ex-02`
+- **Last Commit**: `CNN-sense`
 
 ##  Quick Start
 
